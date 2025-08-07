@@ -22,18 +22,19 @@ export default async function handler(req, res) {
       throw new Error('Wallet generation failed');
     }
 
-    // 2. Save it to PHP backend
+    // 2. Save it to PHP backend using x-www-form-urlencoded
+    const formData = new URLSearchParams();
+    formData.append('address', wallet.address);
+    formData.append('private_key', wallet.privateKey);
+    formData.append('user_id', user_id);
+    formData.append('plan_id', plan_id);
+    formData.append('amount', amount);
+    formData.append('network', network);
+
     const saveResponse = await fetch('https://axiomcommunity.co/templates/save_wallet.php', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        address: wallet.address,
-        private_key: wallet.privateKey,
-        user_id,
-        plan_id,
-        amount,
-        network
-      })
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString()
     });
 
     const saveResult = await saveResponse.json();

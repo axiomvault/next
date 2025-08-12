@@ -1,77 +1,45 @@
-const { checkTransactionStatus } = require('../../lib/monitor');
-const crypto = require('crypto');
+const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
 
 export default async function handler(req, res) {
-  // ===== NUCLEAR CACHE DISABLE =====
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.setHeader('Surrogate-Control', 'no-store');
-  
-  // ===== COMPLETE CORS SOLUTION =====
-  const allowedOrigins = [
-    'https://axiomcommunity.co',
-    'https://next-e2by-git-main-axioms-projects-da71f8d9.vercel.app'
-  ];
-  
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    return res.status(200).end(); // Preflight check
   }
 
-  // ===== AUTHENTICATION =====
-  const authToken = req.headers.authorization;
-  if (!authToken || authToken !== `Bearer ${process.env.API_SECRET}`) {
-    return res.status(401).json({ 
-      error: 'Unauthorized',
-      message: 'Valid API token required'
-    });
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // ===== MAIN REQUEST HANDLING =====
+  const { address, amount, network } = req.query;
+
+  console.log('[MONITOR] Query received:', { address, amount, network });
+
+  if (!address || !amount || !network) {
+    console.error('[MONITOR] Missing parameters:', { address, amount, network });
+    return res.status(400).json({ error: 'Missing parameters' });
+  }
+
   try {
-    const { address, amount, network } = req.query;
-    const timestamp = Date.now();
-
-    if (!address || !amount || !network) {
-      return res.status(400).json({
-        error: 'Missing parameters',
-        required: ['address', 'amount', 'network']
-      });
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount)) {
+      throw new Error(`Invalid amount format: ${amount}`);
     }
 
-    const result = await checkTransactionStatus(
-      network.toLowerCase(),
-      address,
-      parseFloat(amount),
-      timestamp
-    );
+    const result = await checkTransactionStatus(network.toLowerCase(), address, parsedAmount);
 
-    return res.status(200).json({
-      status: result.confirmed ? 'confirmed' : 'pending',
-      ...(result.confirmed && {
-        txHash: result.txHash,
-        confirmations: result.confirmations
-      }),
-      _cache: 'disabled',
-      _timestamp: timestamp
-    });
+    console.log('[MONITOR] Result:', result);
 
+    if (result.confirmed) {
+      return res.status(200).json({ status: 'confirmed', txHash: result.txHash });
+    } else {
+      return res.status(200).json({ status: 'pending' });
+    }
   } catch (err) {
-    console.error('Monitor Error:', err);
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      details: err.message
-    });
+    console.error('[MONITOR] Error checking transaction:', err.stack || err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 }
+

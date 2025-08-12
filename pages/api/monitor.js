@@ -1,16 +1,22 @@
 const { checkTransactionStatus } = require('../../lib/monitor');
+const crypto = require('crypto');
 
 export default async function handler(req, res) {
-  // ===== STRICT NO-CACHE HEADERS =====
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  // ===== NUCLEAR CACHE DISABLE =====
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
+  res.setHeader('Vary', '*');
   
-  // ===== CORS CONFIG =====
+  // ===== FORCE UNIQUE RESPONSE =====
+  const responseId = crypto.randomUUID();
+  res.setHeader('X-Response-ID', responseId);
+  
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Request-ID');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -27,8 +33,6 @@ export default async function handler(req, res) {
   const { address, amount, network } = req.query;
   const timestamp = Date.now();
 
-  console.log(`[${timestamp}] Payment Check:`, { network, address, amount });
-
   if (!address || !amount || !network) {
     return res.status(400).json({
       status: 'error',
@@ -41,8 +45,8 @@ export default async function handler(req, res) {
   try {
     // ===== AMOUNT VALIDATION =====
     const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) {
-      throw new Error(`Invalid amount: ${amount}. Must be a number`);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      throw new Error(`Invalid amount: ${amount}. Must be positive number`);
     }
 
     // ===== NETWORK VALIDATION =====
@@ -51,7 +55,7 @@ export default async function handler(req, res) {
       throw new Error(`Unsupported network: ${network}`);
     }
 
-    // ===== CACHE-BUSTED CHECK =====
+    // ===== FORCE FRESH CHECK =====
     const result = await checkTransactionStatus(
       normalizedNetwork,
       address,
@@ -61,32 +65,34 @@ export default async function handler(req, res) {
 
     // ===== SUCCESS RESPONSE =====
     return res.status(200).json({
-      status: 'success',
-      verified: result.confirmed,
+      status: result.confirmed ? 'confirmed' : 'pending',
       network: normalizedNetwork,
       address,
       amount: parsedAmount,
-      timestamp,
       ...(result.confirmed && {
         txHash: result.txHash,
         confirmations: result.confirmations,
-        blockNumber: result.blockNumber
+        timestamp: result.timestamp
       }),
-      _cache: 'disabled'
+      _metadata: {
+        responseId,
+        timestamp,
+        checksum: crypto.createHash('md5')
+          .update(`${responseId}-${timestamp}-${Math.random()}`)
+          .digest('hex')
+      }
     });
 
   } catch (err) {
     // ===== ERROR HANDLING =====
-    console.error(`[${timestamp}] Verification Failed:`, err.message);
+    console.error(`[${new Date().toISOString()}] Error:`, err.message);
     return res.status(500).json({
       status: 'error',
-      error: 'Payment verification failed',
-      message: err.message,
-      network,
-      address,
-      amount,
-      timestamp,
-      _retry: true
+      error: err.message,
+      _retry: {
+        cacheBuster: `_t=${Date.now()}`,
+        recommended: true
+      }
     });
   }
 }

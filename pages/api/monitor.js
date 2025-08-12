@@ -1,9 +1,18 @@
 const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
 
 export default async function handler(req, res) {
+  // ✅ CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // ✅ Disable all caching
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  // Some hosting providers auto-add ETag — force remove if present
+  res.removeHeader?.('ETag');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end(); // Preflight check

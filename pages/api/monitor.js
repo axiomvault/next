@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     try {
         const parsedAmount = parseFloat(amount);
         if (isNaN(parsedAmount)) {
-            throw new Error(`Invalid amount format: ${amount}`);
+            throw new Error('Invalid amount format');
         }
 
         const result = await checkTransactionStatus(
@@ -33,6 +33,6 @@ export default async function handler(req, res) {
 
         return res.status(200).json(result);
     } catch (err) {
-        return res.status(500).json({ error: err.message || 'Internal Server Error' });
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 }

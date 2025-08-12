@@ -8,7 +8,6 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
-
     if (req.method !== 'GET') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
@@ -31,9 +30,7 @@ export default async function handler(req, res) {
             parsedAmount
         );
 
-        // Include debug logs in API response
         return res.status(200).json(result);
-
     } catch (err) {
         return res.status(500).json({ error: err.message || 'Internal Server Error' });
     }

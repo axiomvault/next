@@ -1,4 +1,4 @@
-const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
+const { checkTransactionStatus } = require('../../lib/monitor'); 
 
 export default async function handler(req, res) {
   // ✅ CORS headers

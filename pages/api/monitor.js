@@ -1,4 +1,4 @@
-const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
+const { checkTransactionStatus } = require('../../lib/monitor');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end(); // Preflight check
+    return res.status(200).end();
   }
 
   if (req.method !== 'GET') {
@@ -39,6 +39,10 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('[MONITOR] Error checking transaction:', err.stack || err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ 
+      error: 'Internal Server Error',
+      details: network.toLowerCase() === 'trc20' ? 'TRC20 monitoring service unavailable' : err.message,
+      network: network.toLowerCase()
+    });
   }
 }

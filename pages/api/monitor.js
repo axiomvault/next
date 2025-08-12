@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
-  // Some hosting providers auto-add ETag — force remove if present
+  // Remove any ETag
   res.removeHeader?.('ETag');
 
   if (req.method === 'OPTIONS') {
@@ -24,30 +24,32 @@ export default async function handler(req, res) {
 
   const { address, amount, network } = req.query;
 
-  console.log('[MONITOR] Query received:', { address, amount, network });
+  let debugInfo = { step: 'start', params: { address, amount, network } };
 
   if (!address || !amount || !network) {
-    console.error('[MONITOR] Missing parameters:', { address, amount, network });
-    return res.status(400).json({ error: 'Missing parameters' });
+    debugInfo.error = 'Missing parameters';
+    return res.status(400).json({ error: 'Missing parameters', debug: debugInfo });
   }
 
   try {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount)) {
-      throw new Error(`Invalid amount format: ${amount}`);
+      debugInfo.error = `Invalid amount format: ${amount}`;
+      return res.status(400).json({ error: 'Invalid amount', debug: debugInfo });
     }
 
+    debugInfo.step = 'checking transaction';
     const result = await checkTransactionStatus(network.toLowerCase(), address, parsedAmount);
 
-    console.log('[MONITOR] Result:', result);
+    debugInfo.result = result;
 
     if (result.confirmed) {
-      return res.status(200).json({ status: 'confirmed', txHash: result.txHash });
+      return res.status(200).json({ status: 'confirmed', txHash: result.txHash, debug: debugInfo });
     } else {
-      return res.status(200).json({ status: 'pending' });
+      return res.status(200).json({ status: 'pending', debug: debugInfo });
     }
   } catch (err) {
-    console.error('[MONITOR] Error checking transaction:', err.stack || err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    debugInfo.error = err.stack || err.message;
+    return res.status(500).json({ error: 'Internal Server Error', debug: debugInfo });
   }
 }

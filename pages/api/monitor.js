@@ -1,4 +1,4 @@
-const { checkTransactionStatus } = require('../../lib/monitor'); 
+const { checkTransactionStatus } = require('../../lib/monitor');
 
 export default async function handler(req, res) {
   // ✅ CORS headers
@@ -24,32 +24,49 @@ export default async function handler(req, res) {
 
   const { address, amount, network } = req.query;
 
-  let debugInfo = { step: 'start', params: { address, amount, network } };
+  let debugInfo = {
+    step: 'start',
+    params: { address, amount, network },
+    reason: '',
+    seenTxs: [],
+    requiredConfirmations: 12,
+    currentConfirmations: 0
+  };
 
   if (!address || !amount || !network) {
-    debugInfo.error = 'Missing parameters';
+    debugInfo.reason = 'Missing parameters';
     return res.status(400).json({ error: 'Missing parameters', debug: debugInfo });
   }
 
   try {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount)) {
-      debugInfo.error = `Invalid amount format: ${amount}`;
+      debugInfo.reason = `Invalid amount format: ${amount}`;
       return res.status(400).json({ error: 'Invalid amount', debug: debugInfo });
     }
 
     debugInfo.step = 'checking transaction';
+
+    // ✅ Get result from monitor with extended debug
     const result = await checkTransactionStatus(network.toLowerCase(), address, parsedAmount);
 
-    debugInfo.result = result;
+    // Merge debug info
+    debugInfo = { ...debugInfo, ...result.debug };
 
     if (result.confirmed) {
-      return res.status(200).json({ status: 'confirmed', txHash: result.txHash, debug: debugInfo });
+      return res.status(200).json({
+        status: 'confirmed',
+        txHash: result.txHash,
+        debug: debugInfo
+      });
     } else {
-      return res.status(200).json({ status: 'pending', debug: debugInfo });
+      return res.status(200).json({
+        status: 'pending',
+        debug: debugInfo
+      });
     }
   } catch (err) {
-    debugInfo.error = err.stack || err.message;
+    debugInfo.reason = `Error checking transaction: ${err.message}`;
     return res.status(500).json({ error: 'Internal Server Error', debug: debugInfo });
   }
 }

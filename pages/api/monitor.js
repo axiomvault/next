@@ -1,29 +1,20 @@
-const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
+const { checkTransactionStatus } = require('../../lib/monitor');
 
 export default async function handler(req, res) {
-  // ✅ CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  // ✅ Disable caching completely
   res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
-  res.removeHeader('ETag');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   const { address, amount, network } = req.query;
-
-  console.log('[MONITOR] Query received:', { address, amount, network });
-
   if (!address || !amount || !network) {
-    console.error('[MONITOR] Missing parameters:', { address, amount, network });
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
@@ -35,15 +26,13 @@ export default async function handler(req, res) {
 
     const result = await checkTransactionStatus(network.toLowerCase(), address, parsedAmount);
 
-    console.log('[MONITOR] Result:', result);
-
     if (result.confirmed) {
       return res.status(200).json({ status: 'confirmed', txHash: result.txHash });
     } else {
       return res.status(200).json({ status: 'pending' });
     }
   } catch (err) {
-    console.error('[MONITOR] Error checking transaction:', err.stack || err.message);
+    console.error('[MONITOR ERROR]', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 }

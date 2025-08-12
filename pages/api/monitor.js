@@ -1,73 +1,44 @@
-const { checkTransactionStatus } = require('../../lib/monitor');
+const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
 
 export default async function handler(req, res) {
-  try {
-    // ✅ CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    // Ensure we always return JSON
-    res.setHeader('Content-Type', 'application/json');
 
-    // Handle OPTIONS request
     if (req.method === 'OPTIONS') {
-      return res.status(200).json({});
+        return res.status(200).end(); // Preflight check
     }
 
-    // Only allow GET requests
     if (req.method !== 'GET') {
-      return res.status(405).json({ 
-        error: 'Method Not Allowed',
-        allowedMethods: ['GET']
-      });
+        return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
     const { address, amount, network } = req.query;
 
-    // Basic validation
+    console.log('[MONITOR] Query received:', { address, amount, network });
+
     if (!address || !amount || !network) {
-      return res.status(400).json({
-        error: 'Missing parameters',
-        required: ['address', 'amount', 'network']
-      });
+        console.error('[MONITOR] Missing parameters:', { address, amount, network });
+        return res.status(400).json({ error: 'Missing parameters' });
     }
 
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({
-        error: 'Invalid amount',
-        message: 'Amount must be a positive number'
-      });
+    try {
+        const parsedAmount = parseFloat(amount);
+        if (isNaN(parsedAmount)) {
+            throw new Error(`Invalid amount format: ${amount}`);
+        }
+
+        const result = await checkTransactionStatus(network.toLowerCase(), address, parsedAmount);
+
+        console.log('[MONITOR] Result:', result);
+
+        if (result.confirmed) {
+            return res.status(200).json({ status: 'confirmed', txHash: result.txHash });
+        } else {
+            return res.status(200).json({ status: 'pending' });
+        }
+    } catch (err) {
+        console.error('[MONITOR] Error checking transaction:', err.stack || err.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
-
-    // Check transaction status
-    const result = await checkTransactionStatus(
-      network.toLowerCase(), 
-      address, 
-      parsedAmount
-    );
-
-    // Successful response
-    return res.status(200).json({
-      status: result.confirmed ? 'confirmed' : 'pending',
-      address,
-      amount: parsedAmount,
-      network,
-      ...(result.confirmed && { receivedAmount: result.debug.balance }),
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Monitor Error:', error);
-    
-    // Proper error response
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      message: error.message,
-      ...(process.env.NODE_ENV === 'development' && {
-        stack: error.stack
-      })
-    });
-  }
 }

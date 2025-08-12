@@ -1,12 +1,17 @@
 const { checkTransactionStatus } = require('../../lib/monitor'); // Adjust path as needed
 
 export default async function handler(req, res) {
+  // ✅ CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  // ✅ Disable caching completely
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
+  res.removeHeader('ETag');
+
   if (req.method === 'OPTIONS') {
-    return res.status(200).end(); // Preflight check
+    return res.status(200).end();
   }
 
   if (req.method !== 'GET') {
@@ -42,4 +47,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 }
-

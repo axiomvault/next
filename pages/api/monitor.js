@@ -3,7 +3,8 @@ const { checkTransactionStatus } = require('../../lib/monitor');
 export default async function handler(req, res) {
   try {
     // ✅ CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // More secure for production
+    res.setHeader('Access-Control-Allow-Origin', 'https://axiomcommunity.co');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     

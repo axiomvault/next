@@ -1,7 +1,8 @@
 import { createWallet } from '../../lib/walletManager';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // More secure for production
+  res.setHeader('Access-Control-Allow-Origin', 'https://axiomcommunity.co');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

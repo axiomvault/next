@@ -1,7 +1,7 @@
 import { createWallet } from '../../lib/walletManager';
+import { encrypt } from '../../lib/encryption'; // <--- IMPORT THIS
 
 export default async function handler(req, res) {
-  // More secure for production
   res.setHeader('Access-Control-Allow-Origin', 'https://axiomcommunity.co');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -23,14 +23,17 @@ export default async function handler(req, res) {
       throw new Error('Wallet generation failed');
     }
 
-    // 2. Save it to PHP backend using x-www-form-urlencoded
+    // 2. Encrypt the private key
+    const encryptedKey = encrypt(wallet.privateKey); // <--- ENCRYPT HERE
+
+    // 3. Save it to PHP backend
     const formData = new URLSearchParams();
     formData.append('address', wallet.address);
-    formData.append('private_key', wallet.privateKey);
+    formData.append('private_key', encryptedKey); // <--- SEND ENCRYPTED KEY
     formData.append('user_id', user_id);
     formData.append('plan_id', plan_id);
     formData.append('amount', amount);
-    formData.append('network', network);
+    formData.append('network', network); // <-- Send the raw network name
 
     const saveResponse = await fetch('https://axiomcommunity.co/templates/save_wallet.php', {
       method: 'POST',
@@ -44,7 +47,6 @@ export default async function handler(req, res) {
       throw new Error(saveResult.error || 'Failed to save wallet');
     }
 
-    // 3. Return public address only
     return res.status(200).json({ success: true, address: wallet.address });
 
   } catch (err) {

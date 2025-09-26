@@ -93,7 +93,9 @@ export default function Dashboard() {
           const contract = await tronWeb.contract().at(usdtAddress);
           balanceBN = await contract.balanceOf(wallet.address).call();
         }
-        return { id: wallet.id, balance: ethers.utils.formatUnits(balanceBN || 0, 6) };
+        // Convert the balance to a string before formatting to ensure compatibility
+        const balanceString = balanceBN ? balanceBN.toString() : '0';
+        return { id: wallet.id, balance: ethers.utils.formatUnits(balanceString, 6) };
       } catch (e) {
         return { id: wallet.id, balance: 'Error' };
       }

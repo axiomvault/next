@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import Head from 'next/head';
 import { ethers } from 'ethers';
 import TronWeb from 'tronweb';
 import styles from './Dashboard.module.css'; // <-- IMPORT THE CSS FILE
@@ -81,22 +82,31 @@ export default function Dashboard() {
     const balancePromises = walletsToFetch.map(async (wallet) => {
       try {
         const usdtAddress = USDT_ADDRESSES[wallet.network];
-        let balanceBN;
+        if (!usdtAddress) {
+          return { id: wallet.id, balance: 'Error' };
+        }
 
-        if (wallet.network === 'ERC-20') {
-          const contract = new ethers.Contract(usdtAddress, USDT_ABI, ethProvider);
-          balanceBN = await contract.balanceOf(wallet.address);
-        } else if (wallet.network === 'BEP-20') {
-          const contract = new ethers.Contract(usdtAddress, USDT_ABI, bscProvider);
+        let balanceBN; // This will hold the raw, big number from the blockchain
+
+        if (wallet.network === 'ERC-20' || wallet.network === 'BEP-20') {
+          const provider = wallet.network === 'ERC-20' ? ethProvider : bscProvider;
+          const contract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
           balanceBN = await contract.balanceOf(wallet.address);
         } else if (wallet.network === 'TRC-20') {
           const contract = await tronWeb.contract().at(usdtAddress);
           balanceBN = await contract.balanceOf(wallet.address).call();
         }
-        // Convert the balance to a string before formatting to ensure compatibility
+
+        // THIS IS THE KEY FIX:
+        // We ensure the raw number is a string, then use ethers.utils.formatUnits
+        // to correctly divide it by 1,000,000 (USDT's 6 decimals).
         const balanceString = balanceBN ? balanceBN.toString() : '0';
-        return { id: wallet.id, balance: ethers.utils.formatUnits(balanceString, 6) };
+        const formattedBalance = ethers.utils.formatUnits(balanceString, 6);
+        
+        return { id: wallet.id, balance: formattedBalance };
+
       } catch (e) {
+        console.error(`Failed to fetch balance for ${wallet.address}:`, e);
         return { id: wallet.id, balance: 'Error' };
       }
     });
@@ -106,6 +116,7 @@ export default function Dashboard() {
       acc[curr.id] = curr.balance;
       return acc;
     }, {});
+
     setBalances(balanceMap);
   };
 
@@ -184,6 +195,12 @@ export default function Dashboard() {
 
   // --- JSX ---
   return (
+    <>
+    <Head>
+        <title>Wallet Dashboard</title>
+        <meta name="robots" content="noindex, nofollow" />
+      </Head>
+
     <div className={styles.container}>
       <h1 className={styles.title}>Wallet Dashboard</h1>
 
@@ -292,5 +309,6 @@ export default function Dashboard() {
         </table>
       </div>
     </div>
+    </>
   );
 }

@@ -9,7 +9,10 @@ const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d37
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 
-const USDT_ABI = [ "function balanceOf(address) view returns (uint256)" ];
+const TOKEN_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)" 
+];
 const USDT_ADDRESSES = {
   'ERC-20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
   'BEP-20': '0x55d398326f99059fF775485246999027B3197955',

@@ -5,7 +5,7 @@ import TronWeb from 'tronweb';
 import styles from './Dashboard.module.css'; // <-- IMPORT THE CSS FILE
 
 // --- Constants (Fill in your details) ---
-const ETH_RPC_URL = 'https://mainnet.infura.io/v3/YOUR_INFURA_API_KEY';
+const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 
@@ -78,7 +78,7 @@ export default function Dashboard() {
     }
   };
 
-  const fetchBalances = async (walletsToFetch) => {
+    const fetchBalances = async (walletsToFetch) => {
     const balancePromises = walletsToFetch.map(async (wallet) => {
       try {
         const usdtAddress = USDT_ADDRESSES[wallet.network];
@@ -86,7 +86,7 @@ export default function Dashboard() {
           return { id: wallet.id, balance: 'Error' };
         }
 
-        let balanceBN; // This will hold the raw, big number from the blockchain
+        let balanceBN;
 
         if (wallet.network === 'ERC-20' || wallet.network === 'BEP-20') {
           const provider = wallet.network === 'ERC-20' ? ethProvider : bscProvider;
@@ -97,11 +97,11 @@ export default function Dashboard() {
           balanceBN = await contract.balanceOf(wallet.address).call();
         }
 
-        // THIS IS THE KEY FIX:
-        // We ensure the raw number is a string, then use ethers.utils.formatUnits
-        // to correctly divide it by 1,000,000 (USDT's 6 decimals).
         const balanceString = balanceBN ? balanceBN.toString() : '0';
         const formattedBalance = ethers.utils.formatUnits(balanceString, 6);
+        
+        // --- ADD THIS DEBUGGING LINE ---
+        console.log(`Wallet ${wallet.address} - Raw: ${balanceString}, Formatted: ${formattedBalance}`);
         
         return { id: wallet.id, balance: formattedBalance };
 

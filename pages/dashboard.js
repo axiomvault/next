@@ -9,6 +9,13 @@ const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d37
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 
+// Array for your TRON API Keys for fallback
+const TRONGRID_API_KEYS = [
+  '9556b28e-c17a-4ad2-a62c-102111131c5a',
+  '856e1643-d353-44c8-9176-69322a3c8a58',
+  '85185b58-af43-4c59-b416-aae95f8cc75f'
+];
+
 const TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)" 
@@ -23,8 +30,6 @@ const NORMALIZED_USDT_ADDRESSES = {
 // --- Blockchain Providers ---
 const ethProvider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
 const bscProvider = new ethers.providers.JsonRpcProvider(BSC_RPC_URL);
-const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-tronWeb.setAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Fix for "owner_address isn't set" bug
 
 // --- Helper Components ---
 const StatCard = ({ title, value, loading = false }) => (
@@ -57,16 +62,44 @@ const CopyButton = ({ text }) => {
   );
 };
 
+// --- Smart helper function for TRON with fallback logic ---
+const fetchTronBalanceWithFallback = async (wallet, tokenAddress) => {
+  for (let i = 0; i < TRONGRID_API_KEYS.length; i++) {
+    const key = TRONGRID_API_KEYS[i];
+    try {
+      const tempTronWeb = new TronWeb({
+        fullHost: 'https://api.trongrid.io',
+        headers: { "TRON-PRO-API-KEY": key }
+      });
+      tempTronWeb.setAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
+
+      const contract = await tempTronWeb.contract().at(tokenAddress);
+      
+      const [decimals, balanceBN] = await Promise.all([
+        contract.decimals().call(),
+        contract.balanceOf(wallet.address).call()
+      ]);
+      
+      return [decimals, balanceBN];
+
+    } catch (error) {
+      console.warn(`TronGrid API Key ${i + 1} failed.`, error.message || error);
+      if (error.message && error.message.includes('429') && i < TRONGRID_API_KEYS.length - 1) {
+        continue;
+      }
+      throw error;
+    }
+  }
+};
+
 // --- Main Dashboard Component ---
 export default function Dashboard() {
   const [wallets, setWallets] = useState([]);
   const [balances, setBalances] = useState({});
   const [loading, setLoading] = useState(true);
   const [transferring, setTransferring] = useState(null);
-  
   const [networkFilter, setNetworkFilter] = useState('all');
   const [balanceFilter, setBalanceFilter] = useState('all');
-
   const [destinationAddresses, setDestinationAddresses] = useState({});
   
   const normalize = (s) => (s || '').toUpperCase().replace('-', '');
@@ -113,11 +146,7 @@ export default function Dashboard() {
               contract.balanceOf(wallet.address)
             ]);
           } else if (normalizedNetwork === 'TRC20') {
-            const contract = await tronWeb.contract().at(tokenAddress);
-            [decimals, balanceBN] = await Promise.all([
-              contract.decimals().call(),
-              contract.balanceOf(wallet.address).call()
-            ]);
+            [decimals, balanceBN] = await fetchTronBalanceWithFallback(wallet, tokenAddress);
           }
   
           const balanceString = balanceBN ? balanceBN.toString() : '0';

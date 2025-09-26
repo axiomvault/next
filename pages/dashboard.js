@@ -84,28 +84,41 @@ export default function Dashboard() {
     const fetchBalances = async (walletsToFetch) => {
     const balancePromises = walletsToFetch.map(async (wallet) => {
       try {
-        const usdtAddress = USDT_ADDRESSES[wallet.network];
-        if (!usdtAddress) {
+        const tokenAddress = USDT_ADDRESSES[wallet.network];
+        if (!tokenAddress) {
           return { id: wallet.id, balance: 'Error' };
         }
 
-        let balanceBN;
+        let balanceBN, decimals;
 
         if (wallet.network === 'ERC-20' || wallet.network === 'BEP-20') {
           const provider = wallet.network === 'ERC-20' ? ethProvider : bscProvider;
-          const contract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
-          balanceBN = await contract.balanceOf(wallet.address);
+          // Use the new, more complete TOKEN_ABI
+          const contract = new ethers.Contract(tokenAddress, TOKEN_ABI, provider);
+
+          // 1. Fetch decimals and balance in parallel
+          [decimals, balanceBN] = await Promise.all([
+            contract.decimals(),
+            contract.balanceOf(wallet.address)
+          ]);
+
         } else if (wallet.network === 'TRC-20') {
-          const contract = await tronWeb.contract().at(usdtAddress);
-          balanceBN = await contract.balanceOf(wallet.address).call();
+          const contract = await tronWeb.contract().at(tokenAddress);
+
+          // 1. Fetch decimals and balance in parallel for TRON
+          [decimals, balanceBN] = await Promise.all([
+            contract.decimals().call(),
+            contract.balanceOf(wallet.address).call()
+          ]);
         }
 
+        // 2. Format the balance using the CORRECT number of decimals
         const balanceString = balanceBN ? balanceBN.toString() : '0';
-        const formattedBalance = ethers.utils.formatUnits(balanceString, 6);
-        
-        // --- ADD THIS DEBUGGING LINE ---
-        console.log(`Wallet ${wallet.address} - Raw: ${balanceString}, Formatted: ${formattedBalance}`);
-        
+        const formattedBalance = ethers.utils.formatUnits(balanceString, decimals);
+
+        // This will show us the proof in the browser console
+        console.log(`Wallet ${wallet.address} - Decimals Found: ${decimals}, Raw: ${balanceString}, Formatted: ${formattedBalance}`);
+
         return { id: wallet.id, balance: formattedBalance };
 
       } catch (e) {

@@ -5,15 +5,17 @@ import TronWeb from 'tronweb';
 import styles from './Dashboard.module.css';
 
 // --- Constants (Fill in your details) ---
-const ETH_RPC_URL = 'https://mainnet.infura.io/v3/YOUR_INFURA_API_KEY';
+const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 
+// A more complete ABI that includes the 'decimals' function
 const TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)" 
 ];
 
+// A normalized map for addresses to fix the case-sensitive bug
 const NORMALIZED_USDT_ADDRESSES = {
   'ERC20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
   'BEP20': '0x55d398326f99059fF775485246999027B3197955',
@@ -24,7 +26,6 @@ const NORMALIZED_USDT_ADDRESSES = {
 const ethProvider = new ethers.providers.JsonRpcProvider(ETH_RPC_URL);
 const bscProvider = new ethers.providers.JsonRpcProvider(BSC_RPC_URL);
 const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io' });
-tronWeb.setAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Fix for "owner_address isn't set" bug
 
 // --- Helper Components ---
 const StatCard = ({ title, value, loading = false }) => (
@@ -88,9 +89,10 @@ export default function Dashboard() {
   };
 
   const fetchBalancesInBatches = async (walletsToFetch) => {
-    const BATCH_SIZE = 5;
-    const DELAY_MS = 1500;
-    
+    const BATCH_SIZE = 10;
+    const DELAY_MS = 1000;
+    let newBalances = {};
+
     for (let i = 0; i < walletsToFetch.length; i += BATCH_SIZE) {
       const batch = walletsToFetch.slice(i, i + BATCH_SIZE);
       

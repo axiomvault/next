@@ -5,7 +5,7 @@ import TronWeb from 'tronweb';
 import styles from './Dashboard.module.css';
 
 // --- Constants (Fill in your details) ---
-const ETH_RPC_URL = 'https://mainnet.infura.io/v3/YOUR_INFURA_API_KEY';
+const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 

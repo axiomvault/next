@@ -2,21 +2,24 @@ import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { ethers } from 'ethers';
 import TronWeb from 'tronweb';
-import styles from './Dashboard.module.css'; // <-- IMPORT THE CSS FILE
+import styles from './Dashboard.module.css';
 
 // --- Constants (Fill in your details) ---
 const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
 const API_BASE_URL = 'https://axiomcommunity.co/templates';
 
+// A more complete ABI that includes the 'decimals' function
 const TOKEN_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)" 
 ];
-const USDT_ADDRESSES = {
-  'ERC-20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-  'BEP-20': '0x55d398326f99059fF775485246999027B3197955',
-  'TRC-20': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+
+// A normalized map for addresses to fix the case-sensitive bug
+const NORMALIZED_USDT_ADDRESSES = {
+  'ERC20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  'BEP20': '0x55d398326f99059fF775485246999027B3197955',
+  'TRC20': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
 };
 
 // --- Blockchain Providers ---
@@ -61,10 +64,14 @@ export default function Dashboard() {
   const [balances, setBalances] = useState({});
   const [loading, setLoading] = useState(true);
   const [transferring, setTransferring] = useState(null);
+  
   const [networkFilter, setNetworkFilter] = useState('all');
-  const [destinationAddresses, setDestinationAddresses] = useState({});
+  const [balanceFilter, setBalanceFilter] = useState('all');
 
-  // --- Data Fetching ---
+  const [destinationAddresses, setDestinationAddresses] = useState({});
+  
+  const normalize = (s) => (s || '').toUpperCase().replace('-', '');
+  
   const fetchAllWallets = async () => {
     try {
       setLoading(true);
@@ -72,7 +79,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.success) {
         setWallets(data.wallets);
-        fetchBalances(data.wallets);
+        fetchBalancesInBatches(data.wallets);
       }
     } catch (e) {
       console.error("Failed to fetch wallets", e);
@@ -81,75 +88,84 @@ export default function Dashboard() {
     }
   };
 
-    const fetchBalances = async (walletsToFetch) => {
-    const balancePromises = walletsToFetch.map(async (wallet) => {
-      try {
-        const tokenAddress = USDT_ADDRESSES[wallet.network];
-        if (!tokenAddress) {
+  const fetchBalancesInBatches = async (walletsToFetch) => {
+    const BATCH_SIZE = 10;
+    const DELAY_MS = 1000;
+    let newBalances = {};
+
+    for (let i = 0; i < walletsToFetch.length; i += BATCH_SIZE) {
+      const batch = walletsToFetch.slice(i, i + BATCH_SIZE);
+      
+      const balancePromises = batch.map(async (wallet) => {
+        try {
+          const normalizedNetwork = normalize(wallet.network);
+          const tokenAddress = NORMALIZED_USDT_ADDRESSES[normalizedNetwork];
+          
+          if (!tokenAddress) {
+            return { id: wallet.id, balance: 'Invalid Network' };
+          }
+  
+          let balanceBN, decimals;
+  
+          if (normalizedNetwork === 'ERC20' || normalizedNetwork === 'BEP20') {
+            const provider = normalizedNetwork === 'ERC20' ? ethProvider : bscProvider;
+            const contract = new ethers.Contract(tokenAddress, TOKEN_ABI, provider);
+            [decimals, balanceBN] = await Promise.all([
+              contract.decimals(),
+              contract.balanceOf(wallet.address)
+            ]);
+          } else if (normalizedNetwork === 'TRC20') {
+            const contract = await tronWeb.contract().at(tokenAddress);
+            [decimals, balanceBN] = await Promise.all([
+              contract.decimals().call(),
+              contract.balanceOf(wallet.address).call()
+            ]);
+          }
+  
+          const balanceString = balanceBN ? balanceBN.toString() : '0';
+          return { id: wallet.id, balance: ethers.utils.formatUnits(balanceString, decimals) };
+        } catch (e) {
+          console.error(`Failed to fetch balance for ${wallet.address}:`, e);
           return { id: wallet.id, balance: 'Error' };
         }
+      });
+      
+      const results = await Promise.all(balancePromises);
+      const batchBalanceMap = results.reduce((acc, curr) => {
+        acc[curr.id] = curr.balance;
+        return acc;
+      }, {});
+      
+      setBalances(prevBalances => ({ ...prevBalances, ...batchBalanceMap }));
 
-        let balanceBN, decimals;
-
-        if (wallet.network === 'ERC-20' || wallet.network === 'BEP-20') {
-          const provider = wallet.network === 'ERC-20' ? ethProvider : bscProvider;
-          // Use the new, more complete TOKEN_ABI
-          const contract = new ethers.Contract(tokenAddress, TOKEN_ABI, provider);
-
-          // 1. Fetch decimals and balance in parallel
-          [decimals, balanceBN] = await Promise.all([
-            contract.decimals(),
-            contract.balanceOf(wallet.address)
-          ]);
-
-        } else if (wallet.network === 'TRC-20') {
-          const contract = await tronWeb.contract().at(tokenAddress);
-
-          // 1. Fetch decimals and balance in parallel for TRON
-          [decimals, balanceBN] = await Promise.all([
-            contract.decimals().call(),
-            contract.balanceOf(wallet.address).call()
-          ]);
-        }
-
-        // 2. Format the balance using the CORRECT number of decimals
-        const balanceString = balanceBN ? balanceBN.toString() : '0';
-        const formattedBalance = ethers.utils.formatUnits(balanceString, decimals);
-
-        // This will show us the proof in the browser console
-        console.log(`Wallet ${wallet.address} - Decimals Found: ${decimals}, Raw: ${balanceString}, Formatted: ${formattedBalance}`);
-
-        return { id: wallet.id, balance: formattedBalance };
-
-      } catch (e) {
-        console.error(`Failed to fetch balance for ${wallet.address}:`, e);
-        return { id: wallet.id, balance: 'Error' };
+      if (i + BATCH_SIZE < walletsToFetch.length) {
+        await new Promise(resolve => setTimeout(resolve, DELAY_MS));
       }
-    });
-
-    const results = await Promise.all(balancePromises);
-    const balanceMap = results.reduce((acc, curr) => {
-      acc[curr.id] = curr.balance;
-      return acc;
-    }, {});
-
-    setBalances(balanceMap);
+    }
   };
 
   useEffect(() => {
     fetchAllWallets();
   }, []);
 
-  // --- State Computations (Memoized) ---
   const filteredWallets = useMemo(() => {
-    if (networkFilter === 'all') return wallets;
-    return wallets.filter(w => w.network === networkFilter);
-  }, [wallets, networkFilter]);
+    let results = [...wallets];
 
- const stats = useMemo(() => {
-    // Helper function to normalize network strings
-    const normalize = (s) => (s || '').toUpperCase().replace('-', '');
+    if (networkFilter !== 'all') {
+      results = results.filter(w => w.network === networkFilter);
+    }
+    
+    if (balanceFilter === 'withBalance') {
+      results = results.filter(w => {
+        const bal = parseFloat(balances[w.id]);
+        return !isNaN(bal) && bal > 0;
+      });
+    }
 
+    return results;
+  }, [wallets, balances, networkFilter, balanceFilter]);
+
+  const stats = useMemo(() => {
     const erc = wallets.filter(w => normalize(w.network) === 'ERC20').length;
     const bep = wallets.filter(w => normalize(w.network) === 'BEP20').length;
     const trc = wallets.filter(w => normalize(w.network) === 'TRC20').length;
@@ -168,7 +184,6 @@ export default function Dashboard() {
     };
   }, [wallets, balances]);
 
-  // --- Event Handlers ---
   const handleAddressChange = (walletId, value) => {
     setDestinationAddresses(prev => ({
       ...prev,
@@ -209,122 +224,147 @@ export default function Dashboard() {
     }
   };
 
-  // --- JSX ---
   return (
     <>
-    <Head>
+      <Head>
         <title>Wallet Dashboard</title>
         <meta name="robots" content="noindex, nofollow" />
       </Head>
 
-    <div className={styles.container}>
-      <h1 className={styles.title}>Wallet Dashboard</h1>
-
-      {/* Stats Cards */}
-      <div className={styles.statsGrid}>
-        <StatCard title="Total Wallets" value={stats.total} loading={loading} />
-        <StatCard title="Total Balance" value={stats.totalBalance} loading={loading && !stats.total} />
-        <StatCard title="ERC-20 Wallets" value={stats.erc} loading={loading} />
-        <StatCard title="BEP-20 Wallets" value={stats.bep} loading={loading} />
-        <StatCard title="TRC-20 Wallets" value={stats.trc} loading={loading} />
-      </div>
-
-      {/* Controls */}
-      <div className={styles.controls}>
-        <div>
-          <label htmlFor="network-filter" style={{marginRight: '0.5rem'}}>Filter by Network:</label>
-          <select 
-            id="network-filter"
-            className={styles.select}
-            value={networkFilter}
-            onChange={(e) => setNetworkFilter(e.target.value)}
-          >
-            <option value="all">All Networks</option>
-            <option value="ERC-20">ERC-20 (Ethereum)</option>
-            <option value="BEP-20">BEP-20 (BSC)</option>
-            <option value="TRC-20">TRC-20 (TRON)</option>
-          </select>
+      <div className={styles.container}>
+        <h1 className={styles.title}>Wallet Dashboard</h1>
+        
+        <div className={styles.statsGrid}>
+            <StatCard title="Total Wallets" value={stats.total} loading={loading} />
+            <StatCard title="Total Balance" value={stats.totalBalance} loading={loading && !stats.total} />
+            <StatCard title="ERC-20 Wallets" value={stats.erc} loading={loading} />
+            <StatCard title="BEP-20 Wallets" value={stats.bep} loading={loading} />
+            <StatCard title="TRC-20 Wallets" value={stats.trc} loading={loading} />
         </div>
-        <button
-          onClick={fetchAllWallets}
-          disabled={loading}
-          className={styles.button}
-        >
-          {loading ? 'Refreshing...' : 'Refresh All'}
-        </button>
-      </div>
 
-      {/* Wallets Table */}
-      <div className={styles.tableContainer}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Address</th>
-              <th>Network</th>
-              <th>Balance (USDT)</th>
-              <th>Destination Address</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && wallets.length === 0 ? (
-              <tr><td colSpan="5" style={{textAlign: 'center', padding: '2rem'}}>Loading wallets...</td></tr>
-            ) : filteredWallets.length === 0 ? (
-              <tr><td colSpan="5" style={{textAlign: 'center', padding: '2rem'}}>No wallets found for this filter.</td></tr>
-            ) : (
-              filteredWallets.map((wallet) => (
-                <tr key={wallet.id}>
-                  <td>
-                    <div className={styles.addressCell}>
-                      <span title={wallet.address}>
-                        {`${wallet.address.substring(0, 6)}...${wallet.address.substring(wallet.address.length - 4)}`}
+        <div className={styles.controls}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <div>
+              <label htmlFor="network-filter" style={{marginRight: '0.5rem'}}>Network:</label>
+              <select 
+                id="network-filter"
+                className={styles.select}
+                value={networkFilter}
+                onChange={(e) => setNetworkFilter(e.target.value)}
+              >
+                <option value="all">All Networks</option>
+                <option value="ERC-20">ERC-20 (Ethereum)</option>
+                <option value="BEP-20">BEP-20 (BSC)</option>
+                <option value="TRC-20">TRC-20 (TRON)</option>
+              </select>
+            </div>
+            <div>
+              <label style={{marginRight: '0.5rem'}}>Show:</label>
+              <div style={{ display: 'inline-flex', gap: '0.5rem', backgroundColor: '#374151', borderRadius: '0.375rem', padding: '0.25rem' }}>
+                <button 
+                  onClick={() => setBalanceFilter('all')} 
+                  style={{ 
+                    padding: '0.25rem 0.75rem', 
+                    borderRadius: '0.25rem',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: balanceFilter === 'all' ? '#2563eb' : 'transparent',
+                    color: 'white'
+                  }}
+                >
+                  All Wallets
+                </button>
+                <button 
+                  onClick={() => setBalanceFilter('withBalance')} 
+                  style={{ 
+                    padding: '0.25rem 0.75rem', 
+                    borderRadius: '0.25rem',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: balanceFilter === 'withBalance' ? '#2563eb' : 'transparent',
+                    color: 'white'
+                  }}
+                >
+                  With Balance
+                </button>
+              </div>
+            </div>
+          </div>
+          <button onClick={fetchAllWallets} disabled={loading} className={styles.button}>
+            {loading ? 'Refreshing...' : 'Refresh All'}
+          </button>
+        </div>
+
+        <div className={styles.tableContainer}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>Network</th>
+                <th>Balance (USDT)</th>
+                <th>Destination Address</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && wallets.length === 0 ? (
+                <tr><td colSpan="5" style={{textAlign: 'center', padding: '2rem'}}>Loading wallets...</td></tr>
+              ) : filteredWallets.length === 0 ? (
+                <tr><td colSpan="5" style={{textAlign: 'center', padding: '2rem'}}>No wallets found for this filter.</td></tr>
+              ) : (
+                filteredWallets.map((wallet) => (
+                  <tr key={wallet.id}>
+                    <td>
+                      <div className={styles.addressCell}>
+                        <span title={wallet.address}>
+                          {`${wallet.address.substring(0, 6)}...${wallet.address.substring(wallet.address.length - 4)}`}
+                        </span>
+                        <CopyButton text={wallet.address} />
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`${styles.networkBadge} ${
+                        normalize(wallet.network) === 'ERC20' ? styles.networkERC :
+                        normalize(wallet.network) === 'BEP20' ? styles.networkBEP :
+                        styles.networkTRC
+                      }`}>
+                        {wallet.network}
                       </span>
-                      <CopyButton text={wallet.address} />
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`${styles.networkBadge} ${
-                      wallet.network === 'ERC-20' ? styles.networkERC :
-                      wallet.network === 'BEP-20' ? styles.networkBEP :
-                      styles.networkTRC
-                    }`}>
-                      {wallet.network}
-                    </span>
-                  </td>
-                  <td>
-                    {balances[wallet.id] === undefined ? (
-                      <span style={{fontSize: '0.75rem', color: '#9ca3af'}}>Loading...</span>
-                    ) : balances[wallet.id] === 'Error' ? (
-                      <span style={{fontSize: '0.75rem', color: '#f87171'}}>Error</span>
-                    ) : (
-                      <span>{parseFloat(balances[wallet.id]).toFixed(2)}</span>
-                    )}
-                  </td>
-                  <td>
-                    <input 
-                      type="text"
-                      placeholder="0x... or T..."
-                      className={styles.textInput}
-                      value={destinationAddresses[wallet.id] || ''}
-                      onChange={(e) => handleAddressChange(wallet.id, e.target.value)}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className={styles.transferButton}
-                      onClick={() => handleTransfer(wallet.id)}
-                      disabled={transferring === wallet.id || !destinationAddresses[wallet.id]}
-                    >
-                      {transferring === wallet.id ? 'Sending...' : 'Send'}
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                    </td>
+                    <td>
+                      {balances[wallet.id] === undefined ? (
+                        <span style={{fontSize: '0.75rem', color: '#9ca3af'}}>Loading...</span>
+                      ) : balances[wallet.id] === 'Error' || balances[wallet.id] === 'Invalid Network' ? (
+                        <span style={{fontSize: '0.75rem', color: '#f87171'}}>{balances[wallet.id]}</span>
+                      ) : (
+                        <span>{parseFloat(balances[wallet.id]).toFixed(2)}</span>
+                      )}
+                    </td>
+                    <td>
+                      <input 
+                        type="text"
+                        placeholder="0x... or T..."
+                        className={styles.textInput}
+                        value={destinationAddresses[wallet.id] || ''}
+                        onChange={(e) => handleAddressChange(wallet.id, e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className={styles.transferButton}
+                        onClick={() => handleTransfer(wallet.id)}
+                        disabled={transferring === wallet.id || !destinationAddresses[wallet.id]}
+                      >
+                        {transferring === wallet.id ? 'Sending...' : 'Send'}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
     </>
   );
 }

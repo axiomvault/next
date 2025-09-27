@@ -5,7 +5,7 @@ import { decrypt } from '../../lib/encryption';
 // --- Constants ---
 const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
-const TRONGRID_API_KEY = '9556b28e-c17a-4ad2-a62c-102111131c5a'; // Using one of your keys
+const TRONGRID_API_KEY = '9556b28e-c17a-4ad2-a62c-102111131c5a';
 
 const USDT_ADDRESSES = {
   'ERC-20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
@@ -13,7 +13,26 @@ const USDT_ADDRESSES = {
   'TRC-20': 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
 };
 const EVM_USDT_ABI = [ "function transfer(address, uint256)", "function balanceOf(address) view returns (uint256)" ];
-const TRON_USDT_ABI = [ "function transfer(address _to, uint256 _value)", "function balanceOf(address who) view returns (uint256)" ];
+
+// --- FIX: Updated TRON_USDT_ABI to the correct JSON format ---
+const TRON_USDT_ABI = [
+    {
+        "inputs": [{"name": "who","type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "","type": "uint256"}],
+        "stateMutability": "View",
+        "type": "Function"
+    },
+    {
+        "inputs": [{"name": "_to","type": "address"},{"name": "_value","type": "uint256"}],
+        "name": "transfer",
+        "outputs": [{"name": "","type": "bool"}],
+        "stateMutability": "Nonpayable",
+        "type": "Function"
+    }
+];
+// ---
+
 const normalize = (s) => (s || '').toUpperCase().replace('-', '');
 
 export default async function handler(req, res) {
@@ -61,10 +80,7 @@ export default async function handler(req, res) {
       const gasCostToSend = totalGasLimit.mul(gasPrice).mul(110).div(100);
       
       console.log(`Funding wallet with ${ethers.utils.formatEther(gasCostToSend)} native coin for gas...`);
-      const fundTx = await sponsorWallet.sendTransaction({
-        to: userWallet.address,
-        value: gasCostToSend
-      });
+      const fundTx = await sponsorWallet.sendTransaction({ to: userWallet.address, value: gasCostToSend });
       await fundTx.wait();
       console.log(`Gas funding successful: ${fundTx.hash}`);
 
@@ -99,14 +115,13 @@ export default async function handler(req, res) {
     } 
     
     // =================================================================
-    // --- BRANCH 2: TRON LOGIC (TRC-20) - REWRITTEN FOR STABILITY ---
+    // --- BRANCH 2: TRON LOGIC (TRC-20) ---
     // =================================================================
     else if (normalizedNetwork === 'TRC20') {
       
       const tronSponsorKey = process.env.TRON_SPONSOR_KEY;
       if (!tronSponsorKey) throw new Error('TRON_SPONSOR_KEY is not set');
 
-      // --- Create a dedicated, safe instance for the user wallet ---
       const userTronWeb = new TronWeb({
         fullHost: 'https://api.trongrid.io',
         privateKey: userWalletKey,
@@ -116,35 +131,31 @@ export default async function handler(req, res) {
       const usdtAddress = USDT_ADDRESSES['TRC-20'];
       const usdtContract = await userTronWeb.contract(TRON_USDT_ABI, usdtAddress);
 
-      const balance = await usdtContract.balanceOf(userAddress).call();
+      const balance = await usdtContract.methods.balanceOf(userAddress).call();
       if (balance.isZero()) throw new Error('No balance to transfer');
 
       console.log(`Starting TRON 2-step transfer for wallet ${walletId}...`);
 
-      // --- Create a dedicated, safe instance for the sponsor wallet ---
       const sponsorTronWeb = new TronWeb({
         fullHost: 'https://api.trongrid.io',
         privateKey: tronSponsorKey,
         headers: { "TRON-PRO-API-KEY": TRONGRID_API_KEY }
       });
       
-      const gasAmountTrx = 30; // 30 TRX is a safe amount for gas
+      const gasAmountTrx = 30;
       console.log(`Sending ${gasAmountTrx} TRX gas to ${userAddress}`);
       
-      // Use the sponsor instance to send TRX
       const fundTx = await sponsorTronWeb.trx.sendTransaction(userAddress, sponsorTronWeb.toSun(gasAmountTrx));
       if (!fundTx || !fundTx.txid) {
           throw new Error('Failed to broadcast TRX gas funding transaction');
       }
       console.log(`Gas sent: ${fundTx.txid}`);
       
-      // Wait for the TRX to arrive (15 seconds is a safe delay)
       await new Promise(resolve => setTimeout(resolve, 15000)); 
       
       console.log(`Sending ${ethers.utils.formatUnits(balance.toString(), 6)} USDT...`);
-      // The usdtContract is already linked to the user's key, so it will sign correctly
-      const transferTxId = await usdtContract.transfer(destinationAddress, balance).send({
-        feeLimit: userTronWeb.toSun(20) // Set a 20 TRX fee limit
+      const transferTxId = await usdtContract.methods.transfer(destinationAddress, balance).send({
+        feeLimit: userTronWeb.toSun(20)
       });
       console.log(`USDT sent: ${transferTxId}`);
 
@@ -159,7 +170,6 @@ export default async function handler(req, res) {
     }
 
   } catch (err) {
-    // Log the full error to Vercel for debugging
     console.error('[TRANSFER API ERROR]:', err);
     res.status(500).json({ error: err.message });
   }

@@ -2,9 +2,11 @@ import { ethers } from 'ethers';
 import TronWeb from 'tronweb';
 import { decrypt } from '../../lib/encryption';
 
-// --- Constants (No change) ---
+// --- Constants ---
 const ETH_RPC_URL = 'https://mainnet.infura.io/v3/9e2db22c015d4d4fbd3deefde96d3765';
 const BSC_RPC_URL = 'https://bsc-dataseed.binance.org/';
+const TRONGRID_API_KEY = '9556b28e-c17a-4ad2-a62c-102111131c5a'; // Using one of your keys
+
 const USDT_ADDRESSES = {
   'ERC-20': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
   'BEP-20': '0x55d398326f99059fF775485246999027B3197955',
@@ -13,7 +15,6 @@ const USDT_ADDRESSES = {
 const EVM_USDT_ABI = [ "function transfer(address, uint256)", "function balanceOf(address) view returns (uint256)" ];
 const TRON_USDT_ABI = [ "function transfer(address _to, uint256 _value)", "function balanceOf(address who) view returns (uint256)" ];
 const normalize = (s) => (s || '').toUpperCase().replace('-', '');
-const tronWeb = new TronWeb({ fullHost: 'https://api.trongrid.io', privateKey: '01' });
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -21,7 +22,6 @@ export default async function handler(req, res) {
   try {
     const { walletId, destinationAddress } = req.body;
 
-    // --- Get Encrypted Key & Address from PHP (No change) ---
     const phpResponse = await fetch('https://axiomcommunity.co/templates/get_wallet_key.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': process.env.PHP_API_KEY },
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     const normalizedNetwork = normalize(network);
 
     // =================================================================
-    // --- BRANCH 1: EVM LOGIC (ERC-20 / BEP-20) - UPGRADED ---
+    // --- BRANCH 1: EVM LOGIC (ERC-20 / BEP-20) ---
     // =================================================================
     if (normalizedNetwork === 'ERC20' || normalizedNetwork === 'BEP20') {
       const provider = normalizedNetwork === 'ERC20' 
@@ -54,18 +54,13 @@ export default async function handler(req, res) {
 
       console.log(`Starting EVM 3-step transfer for wallet ${walletId}...`);
       
-      // --- NEW STEP A: DYNAMIC GAS ESTIMATION ---
       const gasPrice = await provider.getGasPrice();
-      // 1. Estimate gas needed for the USDT transfer
       const usdtTxGasLimit = await usdtContract.connect(userWallet).estimateGas.transfer(destinationAddress, balance);
-      // 2. Estimate gas needed for the final "sweep" transaction (a standard transfer)
       const sweepTxGasLimit = ethers.BigNumber.from(21000); 
-      // 3. Calculate total cost with a 10% buffer for safety
       const totalGasLimit = usdtTxGasLimit.add(sweepTxGasLimit);
-      const gasCostToSend = totalGasLimit.mul(gasPrice).mul(110).div(100); // Cost + 10% buffer
+      const gasCostToSend = totalGasLimit.mul(gasPrice).mul(110).div(100);
       
-      // --- STEP B: FUND FOR GAS ---
-      console.log(`Funding wallet with exactly ${ethers.utils.formatEther(gasCostToSend)} native coin for gas...`);
+      console.log(`Funding wallet with ${ethers.utils.formatEther(gasCostToSend)} native coin for gas...`);
       const fundTx = await sponsorWallet.sendTransaction({
         to: userWallet.address,
         value: gasCostToSend
@@ -73,16 +68,14 @@ export default async function handler(req, res) {
       await fundTx.wait();
       console.log(`Gas funding successful: ${fundTx.hash}`);
 
-      // --- STEP C: SEND THE USDT ---
       console.log(`Sending ${ethers.utils.formatUnits(balance, 6)} USDT...`);
       const transferTx = await usdtContract.connect(userWallet).transfer(destinationAddress, balance, {
-        gasPrice: gasPrice, // Use the same gas price for predictability
+        gasPrice: gasPrice,
         gasLimit: usdtTxGasLimit 
       });
       await transferTx.wait();
       console.log(`USDT transfer successful: ${transferTx.hash}`);
 
-      // --- NEW STEP D: SWEEP LEFTOVER DUST ---
       console.log('Sweeping remaining gas back to sponsor wallet...');
       const remainingBalance = await provider.getBalance(userWallet.address);
       const sweepGasPrice = await provider.getGasPrice();
@@ -106,46 +99,68 @@ export default async function handler(req, res) {
     } 
     
     // =================================================================
-    // --- BRANCH 2: TRON LOGIC (TRC-20) - UNCHANGED ---
+    // --- BRANCH 2: TRON LOGIC (TRC-20) - REWRITTEN FOR STABILITY ---
     // =================================================================
     else if (normalizedNetwork === 'TRC20') {
-      // (The TRON logic remains the same, as its fee structure is more predictable 
-      // and the leftover amount is negligible, making a sweep inefficient.)
+      
       const tronSponsorKey = process.env.TRON_SPONSOR_KEY;
       if (!tronSponsorKey) throw new Error('TRON_SPONSOR_KEY is not set');
 
-      const usdtContract = await tronWeb.contract(TRON_USDT_ABI, USDT_ADDRESSES['TRC-20']);
+      // --- Create a dedicated, safe instance for the user wallet ---
+      const userTronWeb = new TronWeb({
+        fullHost: 'https://api.trongrid.io',
+        privateKey: userWalletKey,
+        headers: { "TRON-PRO-API-KEY": TRONGRID_API_KEY }
+      });
+
+      const usdtAddress = USDT_ADDRESSES['TRC-20'];
+      const usdtContract = await userTronWeb.contract(TRON_USDT_ABI, usdtAddress);
+
       const balance = await usdtContract.balanceOf(userAddress).call();
       if (balance.isZero()) throw new Error('No balance to transfer');
 
       console.log(`Starting TRON 2-step transfer for wallet ${walletId}...`);
+
+      // --- Create a dedicated, safe instance for the sponsor wallet ---
+      const sponsorTronWeb = new TronWeb({
+        fullHost: 'https://api.trongrid.io',
+        privateKey: tronSponsorKey,
+        headers: { "TRON-PRO-API-KEY": TRONGRID_API_KEY }
+      });
       
-      const gasAmountTrx = 30;
-      tronWeb.setPrivateKey(tronSponsorKey);
+      const gasAmountTrx = 30; // 30 TRX is a safe amount for gas
       console.log(`Sending ${gasAmountTrx} TRX gas to ${userAddress}`);
-      const fundTx = await tronWeb.trx.sendTransaction(userAddress, tronWeb.toSun(gasAmountTrx));
-      if (!fundTx.result) throw new Error('Failed to send TRX gas');
+      
+      // Use the sponsor instance to send TRX
+      const fundTx = await sponsorTronWeb.trx.sendTransaction(userAddress, sponsorTronWeb.toSun(gasAmountTrx));
+      if (!fundTx || !fundTx.txid) {
+          throw new Error('Failed to broadcast TRX gas funding transaction');
+      }
       console.log(`Gas sent: ${fundTx.txid}`);
       
+      // Wait for the TRX to arrive (15 seconds is a safe delay)
       await new Promise(resolve => setTimeout(resolve, 15000)); 
       
-      tronWeb.setPrivateKey(userWalletKey);
       console.log(`Sending ${ethers.utils.formatUnits(balance.toString(), 6)} USDT...`);
+      // The usdtContract is already linked to the user's key, so it will sign correctly
       const transferTxId = await usdtContract.transfer(destinationAddress, balance).send({
-        feeLimit: tronWeb.toSun(20)
+        feeLimit: userTronWeb.toSun(20) // Set a 20 TRX fee limit
       });
       console.log(`USDT sent: ${transferTxId}`);
 
       res.status(200).json({ success: true, gasTx: fundTx.txid, transferTx: transferTxId });
     }
     
-    // ... (Unsupported network branch) ...
+    // =================================================================
+    // --- BRANCH 3: UNSUPPORTED ---
+    // =================================================================
     else {
       throw new Error(`Unsupported network: ${network}`);
     }
 
   } catch (err) {
-    console.error(err);
+    // Log the full error to Vercel for debugging
+    console.error('[TRANSFER API ERROR]:', err);
     res.status(500).json({ error: err.message });
   }
 }
